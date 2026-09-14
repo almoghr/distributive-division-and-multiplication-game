@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useRef, useMemo } from 'react';
 
 // --- Sound Synthesizer (Pure Functional Web Audio API, zero libraries) ---
 let audioCtx = null;
@@ -110,7 +110,7 @@ const sfx = {
   }
 };
 
-// --- Color Palette for Slices ---
+// --- Color Palette for Slices (Expanded for Unlimited Parts) ---
 const PART_COLORS = [
   { bg: '#8b5cf6', border: '#7c3aed', light: '#ede9fe', text: '#5b21b6', name: 'Purple' },
   { bg: '#0ea5e9', border: '#0284c7', light: '#e0f2fe', text: '#0369a1', name: 'Blue' },
@@ -118,6 +118,12 @@ const PART_COLORS = [
   { bg: '#f97316', border: '#ea580c', light: '#ffedd5', text: '#9a3412', name: 'Orange' },
   { bg: '#ec4899', border: '#db2777', light: '#fce7f3', text: '#9d174d', name: 'Pink' },
   { bg: '#eab308', border: '#ca8a04', light: '#fef9c3', text: '#854d0e', name: 'Yellow' },
+  { bg: '#06b6d4', border: '#0891b2', light: '#cffafe', text: '#0e7490', name: 'Cyan' },
+  { bg: '#a855f7', border: '#9333ea', light: '#f3e8ff', text: '#6b21a8', name: 'Violet' },
+  { bg: '#14b8a6', border: '#0d9488', light: '#ccfbf1', text: '#115e59', name: 'Teal' },
+  { bg: '#f43f5e', border: '#e11d48', light: '#ffe4e6', text: '#9f1239', name: 'Rose' },
+  { bg: '#6366f1', border: '#4f46e5', light: '#e0e7ff', text: '#3730a3', name: 'Indigo' },
+  { bg: '#84cc16', border: '#65a30d', light: '#ecfccb', text: '#3f6212', name: 'Lime' },
 ];
 
 // --- Random Problem Generator ---
@@ -130,6 +136,7 @@ const MULT_LEVELS = [
 const DIV_LEVELS = [
   { id: 0, name: 'רמה 1: חילוק פשוט' },
   { id: 1, name: 'רמה 2: חילוק תלת-ספרתי' },
+  { id: 2, name: 'רמה 3: אתגר האלפים (4-5 ספרות)' },
 ];
 
 function getRandomInt(min, max) {
@@ -168,13 +175,23 @@ function generateRandomProblem(op, lvl) {
       const part1 = divisor * tensMultiplier;
       const part2 = divisor * getRandomInt(1, 5);
       return { target: part1 + part2, factor: divisor };
-    } else {
+    } else if (lvl === 1) {
       // 3-digit friendly division (e.g. 125/5, 144/6, 216/6, 175/5, 208/4)
       const divisor = [4, 5, 6, 7, 8][getRandomInt(0, 4)];
       const tensMultiplier = getRandomInt(2, 6) * 10;
       const part1 = divisor * tensMultiplier;
       const part2 = divisor * getRandomInt(2, 9);
       return { target: part1 + part2, factor: divisor };
+    } else {
+      // Level 2 (רמה 3): 4- and 5-digit number divided by 2, 3, 4, 5, 6, 7, 8, 9
+      const divisor = [2, 3, 4, 5, 6, 7, 8, 9][getRandomInt(0, 7)];
+      const is5Digit = Math.random() < 0.5;
+      const minTarget = is5Digit ? 10000 : 1000;
+      const maxTarget = is5Digit ? 99999 : 9999;
+      const minQ = Math.ceil(minTarget / divisor);
+      const maxQ = Math.floor(maxTarget / divisor);
+      const q = getRandomInt(minQ, maxQ);
+      return { target: q * divisor, factor: divisor };
     }
   }
 }
@@ -197,18 +214,48 @@ function getPlaceValueSplit(num) {
 // Helper to split into friendly parts divisible by divisor
 function getDivisionFriendlySplit(num, divisor) {
   if (num <= 0 || divisor <= 0) return [num];
-  const step = divisor * 10;
-  let part1 = Math.floor(num / step) * step;
-  if (part1 === num) {
-    part1 -= step;
+  const parts = [];
+  let rem = num;
+
+  // Greedily extract friendly round chunks (multiples of powers of 10)
+  for (let power = 10000; power >= 10; power /= 10) {
+    if (rem <= 0) break;
+    const maxK = Math.floor(rem / power);
+    let bestChunk = 0;
+    for (let k = maxK; k >= 1; k--) {
+      const chunk = k * power;
+      if (chunk % divisor === 0) {
+        bestChunk = chunk;
+        break;
+      }
+    }
+    if (bestChunk > 0) {
+      parts.push(bestChunk);
+      rem -= bestChunk;
+    }
   }
-  if (part1 > 0 && (num - part1) % divisor === 0) {
-    return [part1, num - part1];
+
+  if (rem > 0) {
+    if (rem % divisor === 0) {
+      parts.push(rem);
+    } else {
+      const q = Math.floor(num / divisor);
+      const q1 = Math.floor(q / 2);
+      const q2 = q - q1;
+      return [q1 * divisor, q2 * divisor];
+    }
   }
-  const q = Math.floor(num / divisor);
-  const q1 = Math.floor(q / 2);
-  const q2 = q - q1;
-  return [q1 * divisor, q2 * divisor];
+
+  // Ensure at least 2 parts for distributive representation
+  if (parts.length === 1) {
+    const p = parts[0];
+    const halfQ = Math.floor(p / divisor / 2);
+    if (halfQ > 0) {
+      return [halfQ * divisor, p - halfQ * divisor];
+    }
+  }
+
+  return parts.length > 0 ? parts : [num];
 }
 
 export default function App() {
@@ -237,8 +284,8 @@ export default function App() {
   // 4 = 'VICTORY' (Celebration, full distributive recap)
   const [stage, setStage] = useState(1);
 
-  // Student's Created Distributions
-  const [parts, setParts] = useState(['100', '20', '5']);
+  // Student's Created Distributions - default to two parts with 0 (no auto-destructure)
+  const [parts, setParts] = useState(['0', '0']);
 
   // Answers to sub-problems
   const [subAnswers, setSubAnswers] = useState({});
@@ -259,21 +306,14 @@ export default function App() {
     if (!nextMuted) sfx.playPop();
   };
 
-  function resetForNewProblem(target, op = operation, factor = multiplier) {
+  // Reset helper - always sets parts to two 0s by default
+  function resetForNewProblem() {
     setStage(1);
     setSubAnswers({});
     setSubErrors({});
     setGrandAnswer('');
     setGrandError(false);
-
-    // Initial helpful split suggestion
-    if (op === 'div') {
-      const divParts = getDivisionFriendlySplit(target, factor);
-      setParts(divParts.map(String));
-    } else {
-      const initialParts = getPlaceValueSplit(target);
-      setParts(initialParts.map(String));
-    }
+    setParts(['0', '0']);
   }
 
   const handleSelectOperation = (newOp) => {
@@ -284,7 +324,7 @@ export default function App() {
     setLevelIdx(newLvl);
     const newProb = generateRandomProblem(newOp, newLvl);
     setCurrentProblem(newProb);
-    resetForNewProblem(newProb.target, newOp, newProb.factor);
+    resetForNewProblem();
   };
 
   const handleSelectLevel = (newIdx) => {
@@ -293,17 +333,17 @@ export default function App() {
     setIsCustomMode(false);
     const newProb = generateRandomProblem(operation, newIdx);
     setCurrentProblem(newProb);
-    resetForNewProblem(newProb.target, operation, newProb.factor);
+    resetForNewProblem();
   };
 
   const handleNextProblem = () => {
     sfx.playPop();
     if (isCustomMode) {
-      resetForNewProblem(currentProblem.target, operation, currentProblem.factor);
+      resetForNewProblem();
     } else {
       const newProb = generateRandomProblem(operation, levelIdx);
       setCurrentProblem(newProb);
-      resetForNewProblem(newProb.target, operation, newProb.factor);
+      resetForNewProblem();
     }
   };
 
@@ -313,7 +353,7 @@ export default function App() {
     const f = parseInt(customFactor, 10) || 2;
     const newProb = { target: Math.max(t, 2), factor: Math.max(f, 1) };
     setCurrentProblem(newProb);
-    resetForNewProblem(newProb.target, operation, newProb.factor);
+    resetForNewProblem();
   };
 
   // --- Student Distribution Actions ---
@@ -325,20 +365,32 @@ export default function App() {
   }, [parts]);
 
   const diff = targetNumber - currentSum;
-  const isSumValid = diff === 0 && parts.every(p => parseInt(p, 10) > 0);
+  const isPositiveParts = parts.every(p => {
+    const val = parseInt(p, 10);
+    return !isNaN(val) && val > 0;
+  });
+
+  const hasDivRemainder = operation === 'div' && parts.some(p => {
+    const val = parseInt(p, 10);
+    return !isNaN(val) && val > 0 && val % multiplier !== 0;
+  });
+
+  const isSumValid = diff === 0 && isPositiveParts && !hasDivRemainder;
 
   const handlePartChange = (index, value) => {
     sfx.playPop();
     const newParts = [...parts];
-    // Keep only numbers or empty string
-    newParts[index] = value.replace(/[^0-9]/g, '');
+    let cleaned = value.replace(/[^0-9]/g, '');
+    if (cleaned.length > 1 && cleaned.startsWith('0')) {
+      cleaned = cleaned.replace(/^0+/, '') || '0';
+    }
+    newParts[index] = cleaned;
     setParts(newParts);
   };
 
   const handleAddPart = () => {
-    if (parts.length >= 6) return;
     sfx.playPop();
-    setParts([...parts, '']);
+    setParts([...parts, '0']);
   };
 
   const handleRemovePart = (index) => {
@@ -682,7 +734,6 @@ export default function App() {
                 type="button" 
                 className="toy-btn pink" 
                 onClick={handleAddPart}
-                disabled={parts.length >= 6}
               >
                 ➕ הוסיפו חלק נוסף
               </button>
@@ -692,10 +743,13 @@ export default function App() {
             <div className="parts-row">
               {parts.map((partVal, idx) => {
                 const color = PART_COLORS[idx % PART_COLORS.length];
+                const partNum = parseInt(partVal, 10);
+                const isInvalidDivPart = operation === 'div' && !isNaN(partNum) && partNum > 0 && partNum % multiplier !== 0;
+
                 return (
                   <React.Fragment key={idx}>
                     <div 
-                      className="part-card"
+                      className={`part-card ${isInvalidDivPart ? 'has-div-warning' : ''}`}
                       style={{ borderColor: color.border, backgroundColor: color.light }}
                     >
                       <div className="part-header" style={{ color: color.text }}>
@@ -716,9 +770,15 @@ export default function App() {
                         className="part-input"
                         value={partVal}
                         onChange={(e) => handlePartChange(idx, e.target.value)}
+                        onFocus={(e) => e.target.select()}
                         placeholder="0"
-                        maxLength={5}
+                        maxLength={8}
                       />
+                      {isInvalidDivPart && (
+                        <div className="part-div-warning">
+                          לא מתחלק ב-{multiplier}
+                        </div>
+                      )}
                     </div>
                     {idx < parts.length - 1 && <span className="plus-symbol">+</span>}
                   </React.Fragment>
@@ -738,6 +798,16 @@ export default function App() {
                     🎯 בול פגיעה! הסכום מושלם ומוכן לפילוג!
                   </span>
                 )}
+                {diff === 0 && !isPositiveParts && (
+                  <span className="meter-status-pill over">
+                    ⚠️ נא למלא בכל חלק מספר הגדול מ-0!
+                  </span>
+                )}
+                {diff === 0 && isPositiveParts && hasDivRemainder && (
+                  <span className="meter-status-pill over">
+                    ⚠️ בחילוק, כל חלק חייב להתחלק ב-{multiplier} ללא שארית!
+                  </span>
+                )}
                 {diff > 0 && (
                   <span className="meter-status-pill under">
                     ➕ חסרים עוד {diff} כדי להגיע ל-{targetNumber}!
@@ -746,11 +816,6 @@ export default function App() {
                 {diff < 0 && (
                   <span className="meter-status-pill over">
                     ⚠️ עברתם את היעד ב-{Math.abs(diff)}! הורידו חלקים כדי להגיע ל-{targetNumber}.
-                  </span>
-                )}
-                {diff === 0 && !isSumValid && (
-                  <span className="meter-status-pill over">
-                    ⚠️ נא למלא בכל חלק מספר הגדול מ-0!
                   </span>
                 )}
               </div>
@@ -866,7 +931,7 @@ export default function App() {
                         if (e.key === 'Enter') checkSubAnswer(idx, partVal);
                       }}
                       placeholder="?"
-                      maxLength={6}
+                      maxLength={8}
                     />
 
                     <div className="subproblem-feedback">
@@ -947,7 +1012,7 @@ export default function App() {
                   if (e.key === 'Enter') handleCheckGrandTotal();
                 }}
                 placeholder="סך הכל"
-                maxLength={7}
+                maxLength={9}
                 autoFocus
               />
             </div>
@@ -999,7 +1064,7 @@ export default function App() {
               <button
                 type="button"
                 className="toy-btn blue"
-                onClick={() => resetForNewProblem(targetNumber)}
+                onClick={() => resetForNewProblem()}
               >
                 🔄 נסו פירוק אחר לאותו תרגיל
               </button>
